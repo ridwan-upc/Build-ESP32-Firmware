@@ -5,13 +5,15 @@
 #include <HTTPUpdate.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
-
+#include <Preferences.h>
 
 // ===== Configuration =====
 const char* MANIFEST_URL = 
     "https://github.com/ridwan-upc/Build-ESP32-Firmware/releases/latest/download/manifest.json";
 
-const char* CURRENT_VERSION = "1.0.0";
+// Default version — only used on first boot.
+// After OTA, the version stored in NVS is used.
+const char* DEFAULT_VERSION = "1.0.0";
 
 #define LED_PIN 2               // ESP32 built-in LED
 #define LED_INTERVAL_MS 500     // Blink every 500ms
@@ -19,11 +21,36 @@ const char* CURRENT_VERSION = "1.0.0";
 #define OTA_INTERVAL_MS 3600000 // Check OTA every 1 hour
 
 // ===== State =====
+String currentVersion;
 String latestVersion;
 String firmwareUrl;
 String expectedSha256;
 
+// ============================================================
+// ===== NVS: Read current version =====
+// ============================================================
+String getCurrentVersion() {
+    Preferences prefs;
+    prefs.begin("firmware", true);  // read-only
+    String version = prefs.getString("version", DEFAULT_VERSION);
+    prefs.end();
+    return version;
+}
+
+// ============================================================
+// ===== NVS: Save new version =====
+// ============================================================
+void setCurrentVersion(const String& version) {
+    Preferences prefs;
+    prefs.begin("firmware", false);  // read-write
+    prefs.putString("version", version);
+    prefs.end();
+    Serial.printf("[NVS] Version saved: %s\n", version.c_str());
+}
+
+// ============================================================
 // ===== Function: Connect WiFi via WiFiManager =====
+// ============================================================
 void connectWiFi() {
     WiFiManager wifiManager;
     wifiManager.setConfigPortalTimeout(180);
@@ -44,7 +71,9 @@ void connectWiFi() {
     }
 }
 
+// ============================================================
 // ===== Function: Fetch Manifest =====
+// ============================================================
 bool fetchManifest() {
     HTTPClient http;
     http.begin(MANIFEST_URL);
@@ -75,32 +104,36 @@ bool fetchManifest() {
     expectedSha256 = doc["sha256"].as<String>();
     
     Serial.printf("[OTA] Latest: %s | Current: %s\n", 
-        latestVersion.c_str(), CURRENT_VERSION);
+        latestVersion.c_str(), currentVersion.c_str());
     
     return true;
 }
 
+// ============================================================
 // ===== Function: Check Version =====
+// ============================================================
 bool isUpdateAvailable() {
-    return latestVersion != CURRENT_VERSION;
+    return latestVersion != currentVersion;
 }
 
+// ============================================================
 // ===== Function: OTA Update =====
+// ============================================================
 void performOTA() {
     Serial.println("[OTA] Starting OTA update...");
     Serial.printf("[OTA] URL: %s\n", firmwareUrl.c_str());
     
     // HTTPS client
     WiFiClientSecure client;
-    client.setInsecure();  // TODO: ganti dengan setCACert() untuk production
+    client.setInsecure();  // TODO: replace with setCACert() for production
     client.setTimeout(30);
     
-    // HTTPUpdate dengan redirect support
+    // HTTPUpdate with redirect support
     HTTPUpdate httpUpdate;
     httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
     httpUpdate.rebootOnUpdate(false);
     
-    // Progress callback (opsional, untuk debug)
+    // Progress callback (optional, for debug)
     httpUpdate.onProgress([](int current, int total) {
         static int lastPercent = -1;
         int percent = (current * 100) / total;
@@ -121,13 +154,16 @@ void performOTA() {
             Serial.println("[OTA] No updates");
             break;
         case HTTP_UPDATE_OK:
-            Serial.println("[OTA] ✅ OTA success — rebooting...");
+            Serial.println("[OTA] ✅ OTA success — saving version to NVS...");
+            
+            // Save new version to NVS before reboot
+            setCurrentVersion(latestVersion);
+            
             delay(1000);
             ESP.restart();
             break;
     }
 }
-
 
 // ============================================================
 // ===== TASK 1: LED Blink =====
@@ -194,13 +230,18 @@ void taskOTA(void *parameter) {
     }
 }
 
+// ============================================================
 // ===== Setup =====
+// ============================================================
 void setup() {
     Serial.begin(115200);
     delay(1000);
     
     Serial.println("\n\n=== ESP32 FreeRTOS + OTA Demo ===");
-    Serial.printf("Current version: %s\n", CURRENT_VERSION);
+    
+    // Read version from NVS
+    currentVersion = getCurrentVersion();
+    Serial.printf("Current version: %s\n", currentVersion.c_str());
     Serial.printf("Total cores: %d\n", portNUM_PROCESSORS);
     
     connectWiFi();
@@ -241,7 +282,9 @@ void setup() {
     Serial.println("All tasks created");
 }
 
+// ============================================================
 // ===== Loop (not used) =====
+// ============================================================
 void loop() {
     // Empty — all work is done in tasks
     vTaskDelay(portMAX_DELAY);
