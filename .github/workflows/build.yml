@@ -23,7 +23,7 @@ jobs:
         run: pip install platformio
 
       - name: Build firmware
-        run: pio run -e esp32dev
+        run: pio run -e esp32doit-devkit-v1
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
