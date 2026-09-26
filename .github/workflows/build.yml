@@ -67,6 +67,7 @@ jobs:
           files: |
             .pio/build/esp32doit-devkit-v1/firmware.bin
             .pio/build/esp32doit-devkit-v1/firmware.elf
+            manifest.json 
           generate_release_notes: true
 
       
