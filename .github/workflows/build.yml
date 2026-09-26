@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     tags:
-      - 'v*'
+      - 'v*'          # Production release
+      - 'staging-*'   # Staging release
+      - 'dev-*'       # Dev release
   pull_request:
     branches: [main]
 
@@ -19,6 +21,41 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ============================================================
+      # Determine environment based on trigger
+      # ============================================================
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "channel=production" >> $GITHUB_OUTPUT
+            echo "pio_env=esp32-production" >> $GITHUB_OUTPUT
+            echo "sign=true" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/staging-* ]]; then
+            echo "channel=staging" >> $GITHUB_OUTPUT
+            echo "pio_env=esp32-staging" >> $GITHUB_OUTPUT
+            echo "sign=true" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/dev-* ]]; then
+            echo "channel=dev" >> $GITHUB_OUTPUT
+            echo "pio_env=esp32-dev" >> $GITHUB_OUTPUT
+            echo "sign=false" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "channel=dev" >> $GITHUB_OUTPUT
+            echo "pio_env=esp32-dev" >> $GITHUB_OUTPUT
+            echo "sign=false" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Channel: ${{ steps.env.outputs.channel }}"
+          echo "PlatformIO env: ${{ steps.env.outputs.pio_env }}"
+          echo "Sign: ${{ steps.env.outputs.sign }}"
+
+      # ============================================================
+      # Setup tools
+      # ============================================================
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -30,44 +67,77 @@ jobs:
       - name: Install esptool
         run: pip install esptool
 
+      # ============================================================
+      # Build firmware for the correct environment
+      # ============================================================
       - name: Build firmware
-        run: pio run -e esp32doit-devkit-v1
+        run: pio run -e ${{ steps.env.outputs.pio_env }}
 
-      - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: esp32-firmware
-          path: .pio/build/esp32doit-devkit-v1/firmware.bin
-
-      - name: Generate manifest
-        if: startsWith(github.ref, 'refs/tags/v')
+      # ============================================================
+      # Sign firmware (staging + production only)
+      # ============================================================
+      - name: Decode signing key
+        if: steps.env.outputs.sign == 'true'
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          SHA256=$(sha256sum .pio/build/esp32doit-devkit-v1/firmware.bin | awk '{print $1}')
-          URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/firmware.bin"
+          echo "${{ secrets.FIRMWARE_SIGNING_KEY }}" | base64 -d > private_key.pem
+
+      - name: Sign firmware
+        if: steps.env.outputs.sign == 'true'
+        run: |
+          espsecure.py sign_data \
+            --version 2 \
+            --keyfile private_key.pem \
+            --output firmware-signed.bin \
+            .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
+          
+          mv firmware-signed.bin .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
+          
+          rm -f private_key.pem
+          echo "✅ Firmware signed"
+
+      # ============================================================
+      # Generate manifest (tag only)
+      # ============================================================
+      - name: Generate manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          SHA256=$(sha256sum .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin | awk '{print $1}')
+          URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/firmware.bin"
           
           cat > manifest.json <<EOF
           {
             "version": "${VERSION}",
             "url": "${URL}",
             "sha256": "${SHA256}",
-            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "release_notes": "Release v${VERSION}",
-            "min_version": "1.0.0"
+            "channel": "${{ steps.env.outputs.channel }}",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
           
           echo "=== Manifest content ==="
           cat manifest.json
 
-      - name: Create Release (for hardware)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # ============================================================
+      # Upload artifact (always)
+      # ============================================================
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-firmware-${{ steps.env.outputs.channel }}-${{ github.sha }}
+          path: .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
+          retention-days: 30
+
+      # ============================================================
+      # Create release (tag only)
+      # ============================================================
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            .pio/build/esp32doit-devkit-v1/firmware.bin
-            .pio/build/esp32doit-devkit-v1/firmware.elf
-            manifest.json 
+            .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
+            .pio/build/${{ steps.env.outputs.pio_env }}/firmware.elf
+            manifest.json
+          prerelease: ${{ steps.env.outputs.prerelease == 'true' }}
           generate_release_notes: true
-
-      

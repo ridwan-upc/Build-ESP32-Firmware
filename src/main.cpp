@@ -7,9 +7,23 @@
 #include <WiFiClientSecure.h>
 #include <Preferences.h>
 
-// ===== Configuration =====
-const char* MANIFEST_URL = 
-    "https://github.com/ridwan-upc/Build-ESP32-Firmware/releases/latest/download/manifest.json";
+// ============================================================
+// ===== Configuration (from build flags) =====
+// ============================================================
+
+// MANIFEST_URL is defined by build flags in platformio.ini.
+// Fallback to production if not defined.
+#ifndef MANIFEST_URL
+  #define MANIFEST_URL "https://github.com/ridwan-upc/Build-ESP32-Firmware/releases/latest/download/manifest.json"
+#endif
+
+// VERSION_CHECK_MODE:
+//   0 = compare SHA256 only (dev channel)
+//   1 = compare version OR SHA256 (staging channel)
+//   2 = compare version only (production channel)
+#ifndef VERSION_CHECK_MODE
+  #define VERSION_CHECK_MODE 2
+#endif
 
 // Default version — only used on first boot.
 // After OTA, the version stored in NVS is used.
@@ -22,9 +36,10 @@ const char* DEFAULT_VERSION = "1.0.0";
 
 // ===== State =====
 String currentVersion;
+String currentSha256;
 String latestVersion;
+String latestSha256;
 String firmwareUrl;
-String expectedSha256;
 
 // ============================================================
 // ===== NVS: Read current version =====
@@ -46,6 +61,28 @@ void setCurrentVersion(const String& version) {
     prefs.putString("version", version);
     prefs.end();
     Serial.printf("[NVS] Version saved: %s\n", version.c_str());
+}
+
+// ============================================================
+// ===== NVS: Read current SHA256 =====
+// ============================================================
+String getCurrentSha256() {
+    Preferences prefs;
+    prefs.begin("firmware", true);
+    String sha = prefs.getString("sha256", "");
+    prefs.end();
+    return sha;
+}
+
+// ============================================================
+// ===== NVS: Save new SHA256 =====
+// ============================================================
+void setCurrentSha256(const String& sha) {
+    Preferences prefs;
+    prefs.begin("firmware", false);
+    prefs.putString("sha256", sha);
+    prefs.end();
+    Serial.printf("[NVS] SHA256 saved: %s\n", sha.c_str());
 }
 
 // ============================================================
@@ -101,7 +138,7 @@ bool fetchManifest() {
     
     latestVersion = doc["version"].as<String>();
     firmwareUrl = doc["url"].as<String>();
-    expectedSha256 = doc["sha256"].as<String>();
+    latestSha256 = doc["sha256"].as<String>();
     
     Serial.printf("[OTA] Latest: %s | Current: %s\n", 
         latestVersion.c_str(), currentVersion.c_str());
@@ -110,14 +147,24 @@ bool fetchManifest() {
 }
 
 // ============================================================
-// ===== Function: Check Version =====
+// ===== Function: Check if update is available =====
 // ============================================================
 bool isUpdateAvailable() {
-    return latestVersion != currentVersion;
+    #if VERSION_CHECK_MODE == 0
+        // Dev channel: compare SHA256 only
+        return latestSha256 != currentSha256;
+    #elif VERSION_CHECK_MODE == 1
+        // Staging channel: compare version OR SHA256
+        return (latestVersion != currentVersion) || 
+               (latestSha256 != currentSha256);
+    #else
+        // Production channel: compare version only
+        return latestVersion != currentVersion;
+    #endif
 }
 
 // ============================================================
-// ===== Function: OTA Update =====
+// ===== Function: Perform OTA update =====
 // ============================================================
 void performOTA() {
     Serial.println("[OTA] Starting OTA update...");
@@ -154,10 +201,11 @@ void performOTA() {
             Serial.println("[OTA] No updates");
             break;
         case HTTP_UPDATE_OK:
-            Serial.println("[OTA] ✅ OTA success — saving version to NVS...");
+            Serial.println("[OTA] ✅ OTA success — saving version and SHA256 to NVS...");
             
-            // Save new version to NVS before reboot
+            // Save new version and SHA256 to NVS before reboot
             setCurrentVersion(latestVersion);
+            setCurrentSha256(latestSha256);
             
             delay(1000);
             ESP.restart();
@@ -239,10 +287,14 @@ void setup() {
     
     Serial.println("\n\n=== ESP32 FreeRTOS + OTA Demo ===");
     
-    // Read version from NVS
+    // Read version and SHA256 from NVS
     currentVersion = getCurrentVersion();
+    currentSha256 = getCurrentSha256();
     Serial.printf("Current version: %s\n", currentVersion.c_str());
+    Serial.printf("Current SHA256: %s\n", currentSha256.c_str());
     Serial.printf("Total cores: %d\n", portNUM_PROCESSORS);
+    Serial.printf("Version check mode: %d\n", VERSION_CHECK_MODE);
+    Serial.printf("Manifest URL: %s\n", MANIFEST_URL);
     
     connectWiFi();
     
