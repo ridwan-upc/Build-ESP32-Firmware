@@ -39,15 +39,6 @@ jobs:
           name: esp32-firmware
           path: .pio/build/esp32doit-devkit-v1/firmware.bin
 
-      - name: Create Release (for hardware)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            .pio/build/esp32doit-devkit-v1/firmware.bin
-            .pio/build/esp32doit-devkit-v1/firmware.elf
-          generate_release_notes: true
-
       - name: Generate manifest
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -66,4 +57,16 @@ jobs:
           }
           EOF
           
+          echo "=== Manifest content ==="
           cat manifest.json
+
+      - name: Create Release (for hardware)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            .pio/build/esp32doit-devkit-v1/firmware.bin
+            .pio/build/esp32doit-devkit-v1/firmware.elf
+          generate_release_notes: true
+
+      
