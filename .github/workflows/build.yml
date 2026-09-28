@@ -32,21 +32,29 @@ jobs:
             echo "pio_env=esp32-production" >> $GITHUB_OUTPUT
             echo "sign=true" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "release_tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "static_tag=" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/tags/staging-* ]]; then
             echo "channel=staging" >> $GITHUB_OUTPUT
             echo "pio_env=esp32-staging" >> $GITHUB_OUTPUT
             echo "sign=true" >> $GITHUB_OUTPUT
             echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "release_tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "static_tag=staging" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/tags/dev-* ]]; then
             echo "channel=dev" >> $GITHUB_OUTPUT
             echo "pio_env=esp32-dev" >> $GITHUB_OUTPUT
             echo "sign=false" >> $GITHUB_OUTPUT
             echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "release_tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "static_tag=dev" >> $GITHUB_OUTPUT
           else
             echo "channel=dev" >> $GITHUB_OUTPUT
             echo "pio_env=esp32-dev" >> $GITHUB_OUTPUT
             echo "sign=false" >> $GITHUB_OUTPUT
             echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "release_tag=dev" >> $GITHUB_OUTPUT
+            echo "static_tag=" >> $GITHUB_OUTPUT
           fi
           
           echo "Channel: ${{ steps.env.outputs.channel }}"
@@ -103,9 +111,17 @@ jobs:
       - name: Generate manifest
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${{ steps.env.outputs.release_tag }}
+          STATIC_TAG=${{ steps.env.outputs.static_tag }}
+          
+          # URL firmware pakai static_tag (untuk URL statis)
+          if [ -n "$STATIC_TAG" ]; then
+            URL="https://github.com/${{ github.repository }}/releases/download/${STATIC_TAG}/firmware.bin"
+          else
+            URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/firmware.bin"
+          fi
+          
           SHA256=$(sha256sum .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin | awk '{print $1}')
-          URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/firmware.bin"
           
           cat > manifest.json <<EOF
           {
@@ -117,7 +133,6 @@ jobs:
           }
           EOF
           
-          echo "=== Manifest content ==="
           cat manifest.json
 
       # ============================================================
@@ -133,13 +148,37 @@ jobs:
       # ============================================================
       # Create release (tag only)
       # ============================================================
-      - name: Create Release
+      - name: Create Release (versioned)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.env.outputs.release_tag }}
           files: |
             .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
             .pio/build/${{ steps.env.outputs.pio_env }}/firmware.elf
             manifest.json
           prerelease: ${{ steps.env.outputs.prerelease == 'true' }}
           generate_release_notes: true
+
+      - name: Delete existing static release
+        if: steps.env.outputs.static_tag != ''
+        continue-on-error: true
+        run: |
+          gh release delete ${{ steps.env.outputs.static_tag }} --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Static Release (for stable URL)
+        if: steps.env.outputs.static_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.env.outputs.static_tag }}
+          files: |
+            .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
+            .pio/build/${{ steps.env.outputs.pio_env }}/firmware.elf
+            manifest.json
+          prerelease: true
+          body: |
+            Static release for ${{ steps.env.outputs.channel }} channel.
+            Points to: ${{ steps.env.outputs.release_tag }}
+          generate_release_notes: false
