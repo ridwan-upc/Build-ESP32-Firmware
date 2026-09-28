@@ -157,7 +157,7 @@ jobs:
             .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
             .pio/build/${{ steps.env.outputs.pio_env }}/firmware.elf
             manifest.json
-          prerelease: ${{ steps.env.outputs.prerelease == 'true' }}
+          prerelease: ${{ steps.env.outputs.prerelease}}
           generate_release_notes: true
 
       - name: Delete existing static release
