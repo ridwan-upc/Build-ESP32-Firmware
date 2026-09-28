@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "commit": "abc1234",
+  "updated_at": "2026-09-28T10:00:00Z",
+  "firmware_size": 512000,
+  "boot_time_ms": 2100,
+  "free_heap": 256000,
+  "loop_time_us": 1052,
+  "cpu_load_percent": 8.67
+}

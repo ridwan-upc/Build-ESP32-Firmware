@@ -182,3 +182,10 @@ jobs:
             Static release for ${{ steps.env.outputs.channel }} channel.
             Points to: ${{ steps.env.outputs.release_tag }}
           generate_release_notes: false
+
+      - name: Run benchmark
+        run: |
+          python benchmarks/benchmark.py > current.json
+          
+          # Compare with baseline
+          python benchmarks/compare.py current.json benchmarks/baseline.json
