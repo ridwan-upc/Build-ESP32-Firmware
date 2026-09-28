@@ -80,11 +80,12 @@ jobs:
         if: steps.env.outputs.sign == 'true'
         run: |
           echo "${{ secrets.FIRMWARE_SIGNING_KEY }}" | base64 -d > private_key.pem
+          ls -la private_key.pem
 
       - name: Sign firmware
         if: steps.env.outputs.sign == 'true'
         run: |
-          espsecure.py sign_data \
+          python -m espsecure sign-data \
             --version 2 \
             --keyfile private_key.pem \
             --output firmware-signed.bin \
@@ -94,6 +95,7 @@ jobs:
           
           rm -f private_key.pem
           echo "✅ Firmware signed"
+          ls -la .pio/build/${{ steps.env.outputs.pio_env }}/firmware.bin
 
       # ============================================================
       # Generate manifest (tag only)
