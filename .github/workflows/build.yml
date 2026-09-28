@@ -184,13 +184,13 @@ jobs:
           generate_release_notes: false
 
       - name: Run benchmark
-        if: steps.env.outputs.channel == 'production'
+        #### if: steps.env.outputs.channel == 'production' ##
         run: |
-          # Measure — butuh 1 argumen (env)
+          # Measure 
           python benchmarks/benchmark.py ${{ steps.env.outputs.pio_env }} > current.json
           cat current.json
           
-          # Compare — butuh 2 argumen (current, baseline)
+          # Compare 
           if [ -f benchmarks/baseline.json ]; then
             python benchmarks/compare.py current.json benchmarks/baseline.json
           else
